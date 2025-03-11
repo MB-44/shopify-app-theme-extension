@@ -1,7 +1,5 @@
-// initialize an API client object
 const api = new Gadget();
 
-// query Gadget for the recommended products based on quiz answers, using a JS query
 const fetchRecommendedProducts = async (answerIds) => {
   const queryIdFilter = answerIds.map((answerId) => {
     return { id: { equals: answerId } };
@@ -34,7 +32,6 @@ const fetchRecommendedProducts = async (answerIds) => {
   return recommendedProducts;
 };
 
-// fetch the quiz questions and answers to be presented to shoppers, using a GraphQL query
 const fetchQuiz = async (quizSlug) => {
   const quiz = await api.quiz.findFirst({
     filter: {
@@ -66,7 +63,6 @@ const fetchQuiz = async (quizSlug) => {
   return quiz;
 };
 
-// save the shopper's email and recommended productions to Gadget (for follow-up emails!)
 const saveSelections = async (quizId, email, recommendedProducts) => {
   const productsQuery = recommendedProducts.map((rp) => {
     return {
@@ -96,10 +92,8 @@ const onSubmitHandler = async (evt, quizId) => {
 
   const recommendedProducts = await fetchRecommendedProducts(selectedAnswers);
 
-  // save email and recommendations to Gadget for follow-up emails
   await saveSelections(quizId, email, recommendedProducts);
 
-  // display recommendations
   let recommendedProductHTML =
     "<div><h2>Based on your selections, we recommend the following products</h2><div style='display: flex; overflow: auto'>";
 
@@ -124,11 +118,17 @@ const onSubmitHandler = async (evt, quizId) => {
 };
 
 let selectedAnswers = [];
+
 const selectAnswer = (evt, answerId, answerText) => {
   selectedAnswers.push(answerId);
   let elId = evt.srcElement.id;
   let parent = document.getElementById(elId).parentNode;
   parent.innerHTML = "<h3><b>" + decodeURI(answerText) + "</b> selected</h3>";
+
+  const productQuiz = evt.target.closest("product-quiz");
+  if (productQuiz && typeof productQuiz.slideToNextQuestion === "function") {
+    productQuiz.slideToNextQuestion();
+  }
 };
 
 document.addEventListener("DOMContentLoaded", function () {
@@ -143,49 +143,98 @@ document.addEventListener("DOMContentLoaded", function () {
         class ProductQuiz extends HTMLElement {
           constructor() {
             super();
+
+            this.styleSettings = {};
+            try {
+              this.styleSettings = JSON.parse(
+                this.getAttribute("data-styles") || "{}"
+              );
+            } catch (err) {
+              console.error("Error parsing style settings:", err);
+            }
+
             this.form = this.querySelector("form");
             this.heading = this.querySelector(".product-quiz__title");
             this.heading.innerHTML = quiz.title;
             this.body = this.querySelector(".product-quiz__body span");
             this.body.innerHTML = quiz.body;
-            this.questions = this.querySelector(".product-quiz__questions");
+            this.questionsContainer = this.querySelector(".product-quiz__questions");
 
-            const questionContainer = this.querySelector(
+            this.currentQuestionIndex = 0;
+
+            const questionContainerTemplate = this.querySelector(
               ".product-quiz__question"
             );
-            const answerContainer = this.querySelector(
+            const answerContainerTemplate = this.querySelector(
               ".product-quiz__question-answer"
             );
 
+            this.questionsContainer.innerHTML = "";
+
             questions.forEach((question, i) => {
-              const clonedDiv = questionContainer.cloneNode(true);
-              clonedDiv.id = "question_" + i;
-              clonedDiv.insertAdjacentHTML(
-                "beforeend",
+              const questionDiv = questionContainerTemplate.cloneNode(true);
+              questionDiv.id = "question_" + i;
+              questionDiv.innerHTML =
                 "<hr /><div><h3>" +
-                  question.node.text +
-                  `</h3></div><div class='product-quiz__answers_${i}'></div>`
-              );
-              this.questions.appendChild(clonedDiv);
+                question.node.text +
+                `</h3></div><div class='product-quiz__answers_${i}'></div>`;
+              if (this.styleSettings.textAlign) {
+                questionDiv.style.textAlign = this.styleSettings.textAlign;
+              }
+              questionDiv.style.display = i === 0 ? "block" : "none";
+              questionDiv.style.transition = "transform 0.5s ease";
+
+              this.questionsContainer.appendChild(questionDiv);
 
               const answers = question.node.answers.edges;
               answers.forEach((answer, j) => {
-                const clonedSpan = answerContainer.cloneNode(true);
-                clonedSpan.id = "answer_" + i + "_" + j;
-                clonedSpan.insertAdjacentHTML(
-                  "beforeend",
-                  `<span><button class="button answer" id="${clonedSpan.id}">${answer.node.text}</button></span>`
-                );
-                clonedSpan.addEventListener("click", (evt) => {
+                const answerSpan = answerContainerTemplate.cloneNode(true);
+                answerSpan.id = "answer_" + i + "_" + j;
+                answerSpan.innerHTML =
+                  `<span><button class="button answer" id="${answerSpan.id}">${answer.node.text}</button></span>`;
+                const btn = answerSpan.querySelector("button");
+                if (this.styleSettings.answerButtonColor) {
+                  btn.style.backgroundColor = this.styleSettings.answerButtonColor;
+                }
+                if (this.styleSettings.borderWidth && this.styleSettings.borderColor) {
+                  btn.style.border = `${this.styleSettings.borderWidth}px solid ${this.styleSettings.borderColor}`;
+                }
+                if (this.styleSettings.fontSize) {
+                  btn.style.fontSize = this.styleSettings.fontSize + "px";
+                }
+                if (this.styleSettings.textAlign) {
+                  btn.style.textAlign = this.styleSettings.textAlign;
+                }
+                answerSpan.addEventListener("click", (evt) => {
                   selectAnswer(evt, answer.node.id, answer.node.text);
                 });
-                this.querySelector(`.product-quiz__answers_${i}`).appendChild(
-                  clonedSpan
-                );
+                this.querySelector(`.product-quiz__answers_${i}`).appendChild(answerSpan);
               });
             });
 
-            this.form.addEventListener("submit", async function (evt) {
+            this.slideToNextQuestion = () => {
+              const questionElements = this.questionsContainer.children;
+              if (this.currentQuestionIndex < questionElements.length - 1) {
+                const currentQuestion = questionElements[this.currentQuestionIndex];
+
+                currentQuestion.style.transform = "translateX(-100%)";
+                setTimeout(() => {
+                  currentQuestion.style.display = "none";
+                  this.currentQuestionIndex++;
+                  const nextQuestion = questionElements[this.currentQuestionIndex];
+                  nextQuestion.style.display = "block";
+                  nextQuestion.style.transform = "translateX(100%)";
+                  setTimeout(() => {
+                    nextQuestion.style.transition = "transform 0.5s ease";
+                    nextQuestion.style.transform = "translateX(0)";
+                  }, 50);
+                }, 500);
+              } else {
+                console.log("Quiz complete");
+              }
+            };
+
+            this.form.addEventListener("submit", async (evt) => {
               await onSubmitHandler(evt, quiz.id);
             });
           }

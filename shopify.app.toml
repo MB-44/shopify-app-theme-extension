@@ -1,0 +1,25 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+name = "product-quizyy"
+client_id = "842b9f1ab397a0ee6c4c03d3bc81a43d"
+application_url = "https://product-quiz-sc--development.gadget.app/api/shopify/install-or-render"
+embedded = true
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+use_legacy_install_flow = true
+
+[auth]
+redirect_urls = [
+  "https://product-quiz-sc--development.gadget.app/api/connections/auth/shopify/callback"
+]
+
+[webhooks]
+api_version = "2025-01"
+
+[pos]
+embedded = false
+
+[build]
+dev_store_url = "jgrou.myshopify.com"
+include_config_on_deploy = true
