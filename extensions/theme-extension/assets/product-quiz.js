@@ -37,7 +37,7 @@ const fetchQuiz = async (quizIdentifier) => {
               node: {
                 id: true,
                 text: true,
-                nextQuestionId: true  // New field for linking to the next question.
+                nextQuestionId: true // Field for linking to the next question.
               },
             },
           },
@@ -46,23 +46,29 @@ const fetchQuiz = async (quizIdentifier) => {
     },
   };
 
+  // First, try to fetch using the quizIdentifier as an ID.
+  try {
+    const quizById = await api.quiz.findOne(quizIdentifier, { select: selectionFields });
+    if (quizById) {
+      return quizById;
+    }
+  } catch (error) {
+    console.log("Error fetching quiz by ID:", error);
+  }
+
+  // If fetching by ID fails, fallback to fetching by slug.
   try {
     const quizBySlug = await api.quiz.maybeFindFirst({
       filter: { slug: { equals: quizIdentifier } },
       select: selectionFields,
     });
-    if (quizBySlug) return quizBySlug;
+    if (quizBySlug) {
+      return quizBySlug;
+    }
   } catch (error) {
-    console.log("Error fetching quiz by slug, will try by ID:", error);
+    console.log("Error fetching quiz by slug:", error);
   }
-
-  try {
-    const quizById = await api.quiz.findOne(quizIdentifier, { select: selectionFields });
-    return quizById;
-  } catch (error) {
-    console.log("Error fetching quiz by ID:", error);
-    return null;
-  }
+  return null;
 };
 
 const saveSelections = async (quizId, email, recommendedProducts) => {
