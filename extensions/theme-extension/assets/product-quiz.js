@@ -1,5 +1,8 @@
 const api = new Gadget();
 
+/**
+ * Fetch recommended products from Gadget.dev based on selected answer IDs
+ */
 const fetchRecommendedProducts = async (answerIds) => {
   const queryIdFilter = answerIds.map((answerId) => ({ id: { equals: answerId } }));
   const recommendedProducts = await api.answer.findMany({
@@ -22,6 +25,9 @@ const fetchRecommendedProducts = async (answerIds) => {
   return recommendedProducts;
 };
 
+/**
+ * Fetch quiz by ID or slug
+ */
 const fetchQuiz = async (quizIdentifier) => {
   const selectionFields = {
     id: true,
@@ -37,7 +43,7 @@ const fetchQuiz = async (quizIdentifier) => {
               node: {
                 id: true,
                 text: true,
-                nextQuestionId: true // Field for linking to the next question.
+                nextQuestionId: true
               },
             },
           },
@@ -46,7 +52,7 @@ const fetchQuiz = async (quizIdentifier) => {
     },
   };
 
-  // First, try to fetch using the quizIdentifier as an ID.
+  // First, try using quizIdentifier as an ID
   try {
     const quizById = await api.quiz.findOne(quizIdentifier, { select: selectionFields });
     if (quizById) {
@@ -56,7 +62,7 @@ const fetchQuiz = async (quizIdentifier) => {
     console.log("Error fetching quiz by ID:", error);
   }
 
-  // If fetching by ID fails, fallback to fetching by slug.
+  // Fallback: try slug
   try {
     const quizBySlug = await api.quiz.maybeFindFirst({
       filter: { slug: { equals: quizIdentifier } },
@@ -68,25 +74,11 @@ const fetchQuiz = async (quizIdentifier) => {
   } catch (error) {
     console.log("Error fetching quiz by slug:", error);
   }
+
   return null;
 };
 
-const saveSelections = async (quizId, email, recommendedProducts) => {
-  const productsQuery = recommendedProducts.map((rp) => ({
-    create: {
-      product: { _link: rp.recommendedProduct.productSuggestion.id },
-      shop: { _link: window.shopId },
-    },
-  }));
-  await api.quizResult.create({
-    quiz: { _link: quizId },
-    shop: { _link: window.shopId },
-    email: email,
-    shopperSuggestions: productsQuery,
-  });
-};
-
-// Utility functions for smooth transitions.
+// Simple fade-out and fade-in transitions
 const fadeOut = (element, callback) => {
   element.style.transition = "opacity 0.5s";
   element.style.opacity = 0;
@@ -105,18 +97,62 @@ const fadeIn = (element) => {
   }, 50);
 };
 
+// Global quiz state
 let selectedAnswers = [];
 let totalQuestions = 0;
-let questionsArray = []; // Will hold quiz questions for reference.
+let questionsArray = [];
 
+/**
+ * Display recommended products at the end of the quiz
+ */
+const showRecommendedProducts = async () => {
+  const recommendedProducts = await fetchRecommendedProducts(selectedAnswers);
+
+  // Build HTML for recommended products
+  let recommendedProductHTML = `
+    <div>
+      <h2>Based on your selections, we recommend the following products:</h2>
+      <div style="display: flex; overflow: auto;">
+  `;
+
+  recommendedProducts.forEach((result) => {
+    const { recommendedProduct } = result;
+    const imgUrl =
+      recommendedProduct.productSuggestion.media?.edges?.[0]?.node?.image?.originalSrc;
+    const productLink = recommendedProduct.productSuggestion.handle;
+
+    recommendedProductHTML += `
+      <div style="padding: 8px 16px; margin: 10px; border: 1px solid black; display: flex; flex-direction: column; align-items: center;">
+        <h3>${recommendedProduct.productSuggestion.title}</h3>
+        <a class="button" href="/products/${productLink}">Check it out</a>
+        <img src="${imgUrl}" width="200px" style="margin-top: 8px;" />
+      </div>
+    `;
+  });
+
+  recommendedProductHTML += `</div></div>`;
+
+  // Replace quiz questions with the recommended products
+  const questionsContainer = document.getElementById("questions");
+  if (questionsContainer) {
+    questionsContainer.innerHTML = recommendedProductHTML;
+  }
+};
+
+/**
+ * Handle selecting an answer
+ */
 const selectAnswer = (evt, answer, questionIndex) => {
   selectedAnswers.push(answer.id);
-  const currentQuestionElem = document.getElementById("question_" + questionsArray[questionIndex].node.id);
-  
-  // Fade out the current question.
+
+  const currentQuestionElem = document.getElementById(
+    "question_" + questionsArray[questionIndex].node.id
+  );
+
+  // Fade out current question
   if (currentQuestionElem) {
     fadeOut(currentQuestionElem, () => {
-      // If the answer has a nextQuestionId, try to show that question.
+      // If the answer has a nextQuestionId, show that question
       if (answer.nextQuestionId) {
         const nextQuestionElem = document.getElementById("question_" + answer.nextQuestionId);
         if (nextQuestionElem) {
@@ -124,88 +160,100 @@ const selectAnswer = (evt, answer, questionIndex) => {
           return;
         }
       }
-      // Fallback: show the next sequential question.
+
+      // Fallback: show next sequential question
       if (questionIndex + 1 < totalQuestions) {
-        const nextQuestionElem = document.getElementById("question_" + questionsArray[questionIndex + 1].node.id);
+        const nextQuestionElem = document.getElementById(
+          "question_" + questionsArray[questionIndex + 1].node.id
+        );
         if (nextQuestionElem) {
           fadeIn(nextQuestionElem);
           return;
         }
       }
-      // End of quiz: reveal the email submission section.
-      document.querySelector(".product-quiz__email-container").style.display = "block";
-      document.querySelector(".product-quiz__submit").style.display = "block";
-      document.querySelector(".product-quiz__submit-hr").style.display = "block";
+
+      // No more questions: directly show recommended products
+      showRecommendedProducts();
     });
   }
 };
 
-document.addEventListener("DOMContentLoaded", function () {
-  var quizSlug = window.quizSlug;
+/**
+ * Initialize the quiz on DOM load
+ */
+document.addEventListener("DOMContentLoaded", async function () {
+  const quizSlug = window.quizSlug;
+  const quiz = await fetchQuiz(quizSlug);
+  if (!quiz) {
+    console.log("No quiz found with identifier:", quizSlug);
+    return;
+  }
 
-  fetchQuiz(quizSlug).then(async (quiz) => {
-    const questions = quiz.questions.edges;
-    totalQuestions = questions.length;
-    questionsArray = questions;
+  const questions = quiz.questions.edges;
+  totalQuestions = questions.length;
+  questionsArray = questions;
 
-    if (!customElements.get("product-quiz")) {
-      customElements.define(
-        "product-quiz",
-        class ProductQuiz extends HTMLElement {
-          constructor() {
-            super();
-            this.form = this.querySelector("form");
-            this.heading = this.querySelector(".product-quiz__title");
-            this.heading.innerHTML = quiz.title;
-            this.body = this.querySelector(".product-quiz__body span");
-            this.body.innerHTML = quiz.body;
-            this.questions = this.querySelector(".product-quiz__questions");
+  // Define a custom element only once
+  if (!customElements.get("product-quiz")) {
+    customElements.define(
+      "product-quiz",
+      class ProductQuiz extends HTMLElement {
+        constructor() {
+          super();
+          this.heading = this.querySelector(".product-quiz__title");
+          this.heading.innerHTML = quiz.title;
 
-            const emailContainer = this.querySelector(".product-quiz__email-container");
-            const submitButton = this.querySelector(".product-quiz__submit");
-            const submitHr = this.querySelector(".product-quiz__submit-hr");
-            if (emailContainer) emailContainer.style.display = "none";
-            if (submitButton) submitButton.style.display = "none";
-            if (submitHr) submitHr.style.display = "none";
+          this.body = this.querySelector(".product-quiz__body span");
+          this.body.innerHTML = quiz.body;
 
-            const questionContainer = this.querySelector(".product-quiz__question");
-            const answerContainer = this.querySelector(".product-quiz__question-answer");
+          this.questionsContainer = this.querySelector(".product-quiz__questions");
 
-            // Render each question.
-            questions.forEach((question, i) => {
-              const clonedDiv = questionContainer.cloneNode(true);
-              clonedDiv.id = "question_" + question.node.id;
-              if (i > 0) {
-                clonedDiv.style.display = "none";
-              }
-              clonedDiv.insertAdjacentHTML(
+          const questionTemplate = this.querySelector(".product-quiz__question");
+          const answerTemplate = this.querySelector(".product-quiz__question-answer");
+
+          // Hide or remove the email container & submit button
+          const emailContainer = this.querySelector(".product-quiz__email-container");
+          const submitButton = this.querySelector(".product-quiz__submit");
+          const submitHr = this.querySelector(".product-quiz__submit-hr");
+          if (emailContainer) emailContainer.remove();
+          if (submitButton) submitButton.remove();
+          if (submitHr) submitHr.remove();
+
+          // Render each question
+          questions.forEach((question, i) => {
+            const clonedDiv = questionTemplate.cloneNode(true);
+            clonedDiv.id = "question_" + question.node.id;
+            if (i > 0) {
+              clonedDiv.style.display = "none";
+            }
+            clonedDiv.insertAdjacentHTML(
+              "beforeend",
+              `<hr /><div><h3>${question.node.text}</h3></div>
+               <div class="product-quiz__answers_${i}"></div>`
+            );
+            this.questionsContainer.appendChild(clonedDiv);
+
+            // Render answers for this question
+            const answers = question.node.answers.edges;
+            answers.forEach((answerData, j) => {
+              const clonedSpan = answerTemplate.cloneNode(true);
+              clonedSpan.id = `answer_${question.node.id}_${j}`;
+              clonedSpan.insertAdjacentHTML(
                 "beforeend",
-                "<hr /><div><h3>" + question.node.text + "</h3></div><div class='product-quiz__answers_" + i + "'></div>"
+                `<span>
+                  <button class="button answer" id="${clonedSpan.id}">
+                    ${answerData.node.text}
+                  </button>
+                 </span>`
               );
-              this.questions.appendChild(clonedDiv);
-
-              // Render answers for this question.
-              const answers = question.node.answers.edges;
-              answers.forEach((answer, j) => {
-                const clonedSpan = answerContainer.cloneNode(true);
-                clonedSpan.id = "answer_" + question.node.id + "_" + j;
-                clonedSpan.insertAdjacentHTML(
-                  "beforeend",
-                  `<span><button class="button answer" id="${clonedSpan.id}">${answer.node.text}</button></span>`
-                );
-                clonedSpan.addEventListener("click", (evt) => {
-                  selectAnswer(evt, answer.node, i);
-                });
-                this.querySelector(".product-quiz__answers_" + i).appendChild(clonedSpan);
+              clonedSpan.addEventListener("click", (evt) => {
+                selectAnswer(evt, answerData.node, i);
               });
+              this.querySelector(`.product-quiz__answers_${i}`).appendChild(clonedSpan);
             });
-
-            this.form.addEventListener("submit", async function (evt) {
-              await onSubmitHandler(evt, quiz.id);
-            });
-          }
+          });
         }
-      );
-    }
-  });
+      }
+    );
+  }
 });
